@@ -1,5 +1,4 @@
 *.npz
+*.npy
 *.zip
-output*
-dataset
-!dataset/ffhq/download_and_convert_ffhq.py
+output/

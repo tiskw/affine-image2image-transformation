@@ -1,15 +1,21 @@
 # Linear Image2Image Transformation
 
 Unofficial implementation of "The Surprising Effectiveness of Linear Unsupervised Image-to-Image Translation".
-Now this code support only colorization of the FFHQ dataset, however, I will add more features in the future.
+Features of this repository are:
+
+* usage of core classes provided by this repository is close to the `scikit-learn`,
+* this repository focus on the efficiency of the inference.
+
+Now this code supports only colorization of the CelebA and FFHQ dataset, however, I will add more features in the future.
 
 
-## Requirement
+## Requirements
 
 - Python 3.6.9
 - docopt 0.6.2
 - Numpy 1.18.4
 - PyTorch 1.5.0
+- scikit-image 0.17.2
 
 It is good idea to use docker environment in order to avoide polluting your environment.
 The code in this repository is executable (and actually developed) under
@@ -18,42 +24,71 @@ The code in this repository is executable (and actually developed) under
 
 ## Usage
 
-### Download FFHQ dataset
+The interface of the linear transformation is almost same as the `scikit-learn` library.
 
-```console
-$ cd dataset/ffhq
-$ python3 download_and_convert_ffhq.py
+```python
+>>> from linear_image2image_translation import LinearI2I
+>>> X_gray  = ...                         # Grayscale images (shape = [n_data, n_features])
+>>> X_color = ...                         # Color images     (shape = [n_data, n_features])
+>>> lin = LinearI2I()                     # Create linear transformation class instance
+>>> lin.fit(X_gray, X_color)              # Training
+>>> X_color_pred = lin.transform(X_gray)  # Inference
+array([[ -1.59893613e+00,  -2.18870965e-01,  -4.84763930e-02,
+...
 ```
 
-The file `ffhq_thumbnails128x128.npy` will be generated.
-You can erase other files/directories if not necessary.
+## Demo: colorization of CelebA dataset
+
+### Summary
+
+| Method                  | PCA dimension | Accuracy (SSIM/NRMSE) | Multi-add operations | Inference time (CPU) |
+|:-----------------------:|:-------------:|:---------------------:|:--------------------:|:--------------------:|
+| Cycle GAN [1]           |     -         | 0.914 / -             | 110  [G madds/image] |   -  [msec/image]    |
+| Our method (Supervised) |   512         | 0.933 / 0.139         | 33.6 [M madds/image] | 5.01 [msec/image]    |
+| Our method (Supervised) |   128         | 0.933 / 0.141         |  8.4 [M madds/image] | 1.43 [msec/image]    |
 
 
-### Training and inference
+### Sample test images
+
+* Left: Original color image (ground truth)
+* Center: Grayscale image (input image)
+* Right: Predicted color image (inference result)
+
+<div align="center">
+  <img src="resources/celeba_colorization/image-0018.jpg" width="384" height="128" alt="Sample imaeg of CelebA colorization" /><br />
+  <img src="resources/celeba_colorization/image-0043.jpg" width="384" height="128" alt="Sample imaeg of CelebA colorization" /><br />
+  <img src="resources/celeba_colorization/image-0088.jpg" width="384" height="128" alt="Sample imaeg of CelebA colorization" />
+</div>
+
+### Usage
+
+At first, please download the zipped images from
+[the official web page](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html).
 
 ```console
-$ python3 demo_hhfq_colorize.py
+$ cd dataset/celeba
+$ python3 convert_celeba.py
+```
+
+The file `celeba_align_128x128.npy` will be generated.
+You can erase other files/directories if not necessary.
+
+Then, run the following command:
+
+```console
+$ python3 demo_colorize.py
 ```
 
 The test results will be dumped under the `output` directory.
-Please see `python3 demo_hhfq_colorize.py --help` for more details.
+Please see `python3 demo_colorize.py --help` for more details.
 
 
-## Example: colorization of FFHQ images
+### Pre-trained weights for CelebA colorization
 
-| Method     | PCA dimension | Accuracy (SSIM) | Inference time    |
-|:----------:|:-------------:|:---------------:|:-----------------:|
-| Supervised | 1,024         | Comming soon    | 9.92 [msec/image] |
-| Supervised |   512         | Comming soon    | 5.88 [msec/image] |
-| Supervised |   256         | Comming soon    | 3.68 [msec/image] |
-
-
-### Pre-trained weights
-
-* PCA dimension = 1024
-  - [PCA color](https://www.dropbox.com/s/qug0c750gvl9n07/pca_ffhq_color.npz?dl=0)
-  - [PCA gray](https://www.dropbox.com/s/pzafwpuzia5srmh/pca_ffhq_gray.npz?dl=0)
-  - [Linear transform](https://www.dropbox.com/s/j9l5wcle7szw1sf/lin_ffhq_gray_to_color.npz?dl=0) |
+* PCA dimension = 128: 
+  [PCA color](https://www.dropbox.com/s/4ly2nq9f5ksucgj/pca_color.npz?dl=0),
+  [PCA gray](https://www.dropbox.com/s/20gls2ln6p5r9w8/pca_gray.npz?dl=0),
+  [Linear transform](https://www.dropbox.com/s/7kbiom6b9og4ofc/lin_gray_to_color.npz?dl=0)
 
 
 ## Licence
