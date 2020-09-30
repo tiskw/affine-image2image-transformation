@@ -8,15 +8,16 @@
 Overview:
 
 Usage:
-    demo_ffhq_colorize.py [--num_test <int>] [--num_train <int>] [--dim_pca <int>]
+    demo_ffhq_colorize.py [--dim_pca <int>] [--dataset <str>] [--num_test <int>] [--num_train <int>]
     demo_ffhq_colorize.py (-h | --help)
     demo_ffhq_colorize.py --version
 
 Options:
-    --num_test <int>     Number of test data.                           [default: 100]
-    --num_train <int>    Number of training data.                       [default: 20000]
-    --dim_pca <int>      Dimension of principal components.             [default: 1024]
-    --seed <int>         Random seed.                                   [default: 111]
+    --dim_pca <int>      Dimension of principal components.     [default: 1024]
+    --dataset <str>      Select dataset (celeba or ffhq).       [default: celeba]
+    --num_test <int>     Number of test data.                   [default: 100]
+    --num_train <int>    Number of training data.               [default: 30000]
+    --seed <int>         Random seed.                           [default: 111]
     -h, --help           Show this message.
     --version            Show version.
 """
@@ -28,24 +29,28 @@ import time
 import docopt
 import numpy as np
 import cv2   as cv
+import skimage.metrics
 
 from linear_image2image_translation import PCA, LinearI2I
 
 
-def load_ffhq_dataset(data_type, num):
+def load_dataset(dataset_name, data_type, num):
 
-    print("  - Loading original images...")
-    img_all = np.load("dataset/ffhq/ffhq_thumbnails128x128.npy")
+    print("  - Loading dataset: %s" % dataset_name)
+    if dataset_name == "celeba":
+        img_all = np.load("dataset/celeba/celeba_align_128x128.npy")
+    elif dataset_name == "ffhq":
+        img_all = np.load("dataset/ffhq/ffhq_thumbnails128x128.npy")
+    else:
+        raise RuntimeError("load_dataset: dataset should be 'celeba' or 'ffhq'.")
 
+    print("  - Dataset type: %s..." % data_type)
     if data_type == "train": # Use from top
-        print("  - Loading original images (00000.png - %05d.png)..." % num)
         img_c = img_all[:+num, :, :, :]
-
     elif data_type == "test": # Use from bottom
-        print("  - Loading original images (%05d.png - 69999.png)..." % (img_all.shape[0] - num))
         img_c = img_all[-num:, :, :, :]
     else:
-        raise RuntimeError("load_ffhq_dataset: data_type should be 'train' or 'test'.")
+        raise RuntimeError("load_dataset: data_type should be 'train' or 'test'.")
 
     print("  - Generating grayscale images...")
     img_g = np.zeros((img_c.shape[0], 128, 128), dtype = np.uint8)
@@ -63,29 +68,29 @@ def train(X_c, X_g, pca_dim):
 
     print("  - Principal component analysis for color domain...")
     pca_c = PCA(n_components = pca_dim)
-    if os.path.exists("pca_ffhq_color.npz"):
-        pca_c.load("pca_ffhq_color.npz")
+    if os.path.exists("pca_color.npz"):
+        pca_c.load("pca_color.npz")
         Z_c = pca_c.transform(X_c)
     else:
         Z_c = pca_c.fit_transform(X_c, adjust_sign = True)
-        pca_c.save("pca_ffhq_color.npz")
+        pca_c.save("pca_color.npz")
 
     print("  - Principal component analysis for grayscale domain...")
     pca_g = PCA(n_components = pca_dim)
-    if os.path.exists("pca_ffhq_gray.npz"):
-        pca_g.load("pca_ffhq_gray.npz")
+    if os.path.exists("pca_gray.npz"):
+        pca_g.load("pca_gray.npz")
         Z_g = pca_g.transform(X_g)
     else:
         Z_g = pca_g.fit_transform(X_g, adjust_sign = True)
-        pca_g.save("pca_ffhq_gray.npz")
+        pca_g.save("pca_gray.npz")
 
     print("  - Calculate linear transformation...")
     lin = LinearI2I(supervise = True)
-    if os.path.exists("lin_ffhq_gray_to_color.npz"):
-        lin.load("lin_ffhq_gray_to_color.npz")
+    if os.path.exists("lin_gray_to_color.npz"):
+        lin.load("lin_gray_to_color.npz")
     else:
         lin.fit(Z_g, Z_c)
-        lin.save("lin_ffhq_gray_to_color.npz")
+        lin.save("lin_gray_to_color.npz")
 
     return (lin, pca_c, pca_g)
 
@@ -127,25 +132,31 @@ def test(dirpath, X_c, X_g, lin, pca_color, pca_gray):
 
     os.makedirs(dirpath, exist_ok = True)
 
-    images_output = np.zeros((X_g.shape[0], 128, 128, 3))
+    images_output = np.zeros((X_g.shape[0], 128, 128, 3), dtype = np.uint8)
 
     print("  - Running inference...")
     time_start = time.time()
     for n in range(X_g.shape[0]):
-        img_gt  = 255.0 * X_c[n, :].reshape((128, 128, 3))
         img_in  = 255.0 * X_g[n, :].reshape((128, 128))
         img_out = inference(X_g[n, :], lin, pca_color, pca_gray)
         img_out = postproc_colorize(img_in, img_out)
         images_output[n, :, :, :] = img_out
 
-        create_concatenated_image(img_gt, img_in, img_out)
-
     print("  - Elasped time on CPU: %.3f [msec/image]" % ((time.time() - time_start) / X_g.shape[0] * 1000))
 
+    ssim_measures, nmse_measures = list(), list()
+    for n in range(X_g.shape[0]):
+        img_gt  = (255.0 * X_c[n, :]).reshape((128, 128, 3)).astype(np.uint8)
+        img_out = images_output[n, :, :, :]
+        ssim_measures.append(skimage.metrics.structural_similarity(img_gt, img_out, multichannel = True))
+        nmse_measures.append(skimage.metrics.normalized_root_mse(img_gt, img_out))
+    print("  - SSIM measure: %.3f" % np.mean(ssim_measures))
+    print("  - Normalized root MSE measure: %.3f" % np.mean(nmse_measures))
+ 
     print("  - Saving output images...")
     for n in range(X_g.shape[0]):
-        img_gt  = 255.0 * X_c[n, :].reshape((128, 128, 3))
-        img_in  = 255.0 * X_g[n, :].reshape((128, 128))
+        img_gt  = (255.0 * X_c[n, :]).reshape((128, 128, 3)).astype(np.uint8)
+        img_in  = (255.0 * X_g[n, :]).reshape((128, 128)).astype(np.uint8)
         img_out = images_output[n, :, :, :]
         image   = create_concatenated_image(img_gt, img_in, img_out)
         cv.imwrite(os.path.join(dirpath, "image-%04d.png" % n), image)
@@ -162,14 +173,14 @@ def main(args):
     madds   = (dim_in + dim_out) * (args["--dim_pca"] + 1)
     print("  - {:,} [MADDs/image]".format(madds))
 
-    print(":: Loading FFHQ training dataset...")
-    X_color, X_gray = load_ffhq_dataset("train", args["--num_train"])
+    print(":: Loading training dataset...")
+    X_color, X_gray = load_dataset(args["--dataset"], "train", args["--num_train"])
 
     print(":: Train linear transformation...")
     lin, pca_color, pca_gray = train(X_color, X_gray, args["--dim_pca"])
 
-    print(":: Loading FFHQ training dataset...")
-    X_color, X_gray = load_ffhq_dataset("test", args["--num_test"])
+    print(":: Loading training dataset...")
+    X_color, X_gray = load_dataset(args["--dataset"], "test", args["--num_test"])
 
     print(":: Run test...")
     test("output", X_color, X_gray, lin, pca_color, pca_gray)
